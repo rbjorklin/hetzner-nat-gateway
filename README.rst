@@ -19,10 +19,11 @@ Steps
   terraform apply
 
 To use the NAT Gateway created by the above steps one also has to ensure the
-following route exists on all nodes in the network that requires access to the 
+following route exists on all nodes in the network that requires access to the
 internet.
 
 ::
+
     ip route add default via ${var.gateway_ip} dev enp7s0
 
 
