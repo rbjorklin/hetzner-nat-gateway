@@ -17,20 +17,29 @@ resource "hcloud_network" "network" {
   ip_range = var.network_cidr
 }
 
+#data "hcloud_network" "network" {
+#  name     = var.network_name
+#}
+
 resource "hcloud_network_subnet" "subnet" {
+  #network_id   = data.hcloud_network.network.id
   network_id   = hcloud_network.network.id
   type         = "server"
   network_zone = "us-east" # or "eu-central"
-  ip_range     = var.network_subnet_cidr
+  #ip_range     = var.network_subnet_cidr
+  ip_range = "10.0.0.0/24" # data.hcloud_network.network.ip_range
 }
 
 resource "hcloud_server_network" "srvnetwork" {
-  server_id  = hcloud_server.nat-gateway.id
-  subnet_id = hcloud_network_subnet.subnet.id
-  ip         = var.nat_gateway_ip
+  server_id = hcloud_server.nat-gateway.id
+  # https://github.com/hetznercloud/terraform-provider-hcloud/issues/356
+  #subnet_id =  "${data.hcloud_network.network.id}-10.0.0.0/24"
+  subnet_id = "${hcloud_network.network.id}-10.0.0.0/24"
+  ip        = var.nat_gateway_ip
 }
 
-resource "hcloud_network_route" "privNet" {
+resource "hcloud_network_route" "default-gateway" {
+  #network_id  = data.hcloud_network.network.id
   network_id  = hcloud_network.network.id
   destination = "0.0.0.0/0"
   gateway     = var.nat_gateway_ip
@@ -47,8 +56,10 @@ resource "hcloud_server" "nat-gateway" {
   # https://github.com/hetznercloud/terraform-provider-hcloud/issues/572
   user_data = <<EOT
 #!/bin/bash
+test -f /.cloud-init-complete && exit 0
 dnf --assumeyes upgrade
-dnf --assumeyes install nftables
+dnf --assumeyes install nftables wireguard-tools neovim
+alternatives --install /usr/bin/vim vim /usr/bin/nvim 1
 
 rm -f /etc/sysctl.d/30-ipforward.conf
 
@@ -87,12 +98,39 @@ echo 'include "/etc/nftables/hetzner-nat.nft"' >> /etc/sysconfig/nftables.conf
 # NAT Gateway needs this route
 ip route add ${var.network_cidr} via ${var.gateway_ip}
 
+mkdir -p /etc/wireguard
+cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+PrivateKey = ${var.wg_server_private_key}
+ListenPort = 51820
+Address = ${var.server_vpn_address}
+
+# Workstation
+[Peer]
+PublicKey = ${var.wg_client_public_key}
+
+# Addresses with CIDR masks from which incoming traffic for this peer is allowed
+AllowedIPs = ${var.wg_allowed_ips}
+EOF
+
+# Wireguard keys
+echo ${var.wg_server_private_key} > /etc/wireguard/privatekey
+echo ${var.wg_server_public_key} > /etc/wireguard/publickey
+
+chmod 600 /etc/wireguard/wg0.conf
+chmod 600 /etc/wireguard/privatekey
+chmod 600 /etc/wireguard/publickey
+
+systemctl enable --now wg-quick@wg0.service
+
 # DNS config required for clients
 # https://docs.hetzner.com/dns-console/dns/general/recursive-name-servers
 mkdir -p /etc/systemd/resolved.conf.d
 cat > /etc/systemd/resolved.conf.d/dns.conf << EOF
 [Resolve]
-DNS=185.12.64.2 185.12.64.1 
+DNS=185.12.64.2 185.12.64.1
+
+touch /.cloud-init-complete
 EOF
 EOT
 }

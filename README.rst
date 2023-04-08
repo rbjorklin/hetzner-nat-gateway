@@ -10,6 +10,12 @@ This repo sets up a network with an initial node to be used as a NAT Gateway.
 It does so by providing a terraform module implementing the steps outlined in
 this `Hetzner community guide`_.
 
+Outstanding tasks
+-----------------
+
+- [ ] Harden nftables rules to only allow traffic from specific CIDRs
+- [ ] The nftables rules breaks ``kind`` which stops bootstraping from working
+
 Steps
 -----
 ::
